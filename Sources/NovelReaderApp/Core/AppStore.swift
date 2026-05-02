@@ -67,12 +67,15 @@ final class AppStore: ObservableObject {
     private let credentialStore: NASCredentialStore = KeychainNASCredentialStore()
     private var downloadWorkers: [UUID: Task<Void, Never>] = [:]
     private var saveTask: Task<Void, Never>?
+    private var saveDebounceDuration: Duration = .milliseconds(300)
+    private var batchCacheSaveCounter = 0
+    private var pendingCacheContinuation: (bookID: UUID, originalLimit: Int?)? = nil
     private var sourceSearchTask: Task<Void, Never>?
     private var activeSearchID: UUID?
     private let defaultReaderServerInstallKey = "NovelReaderApp.didInstallDefaultReaderServer.192.168.31.205.4396"
     private let pendingReaderSyncKey = "NovelReaderApp.pendingReaderSyncBookIDs"
     private let lastReaderSyncKey = "NovelReaderApp.lastReaderServerSyncAt"
-    private let maxConcurrentDownloads = 4
+    private let maxConcurrentDownloads = 3
 
     init() {
         activityMessage = "正在加载本地书库"
@@ -140,19 +143,31 @@ final class AppStore: ObservableObject {
     }
 
     func save() {
-        let snapshot = LibrarySnapshot(
-            books: books,
-            sources: sources,
-            nasConnections: nasConnections,
-            downloads: downloads,
-            readerTheme: readerTheme
-        )
+        scheduleSave(debounce: saveDebounceDuration)
+    }
+
+    /// Debounced save — coalesces rapid successive calls (e.g. during batch chapter caching).
+    /// Each call cancels the previous pending save; the actual write only happens after
+    /// `debounce` elapses with no new calls, preventing the JSON encoder from running
+    /// hundreds of times when caching many chapters.
+    private func scheduleSave(debounce: Duration) {
         persistNASCredentials(nasConnections)
         saveTask?.cancel()
-        saveTask = Task { [snapshot] in
+        saveTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: debounce)
+            guard !Task.isCancelled, let self else { return }
+            let snapshot = LibrarySnapshot(
+                books: self.books,
+                sources: self.sources,
+                nasConnections: self.nasConnections,
+                downloads: self.downloads,
+                readerTheme: self.readerTheme
+            )
             do {
                 try await Task.detached(priority: .utility) {
-                    try SQLiteLibraryStorage().save(snapshot)
+                    try autoreleasepool {
+                        try SQLiteLibraryStorage().save(snapshot)
+                    }
                 }.value
             } catch {
                 await MainActor.run {
@@ -675,7 +690,12 @@ final class AppStore: ObservableObject {
                     && !hasActiveChapterDownload(bookID: currentBook.id, chapterIndex: chapter.index)
                     && (useReaderServer || chapter.url != nil)
             }
-        let selectedChapters = Array(limit.map { chapters.prefix($0) } ?? chapters[...])
+        // Cap the queue size to avoid creating thousands of tasks at once.
+        // When a batch finishes, startQueuedDownloadsIfNeeded() will pick up more.
+        let maxQueueSize = 30
+        let effectiveLimit = limit.map { min($0, maxQueueSize) } ?? maxQueueSize
+        let totalAvailable = chapters.count
+        let selectedChapters = Array(chapters.prefix(effectiveLimit))
         guard !selectedChapters.isEmpty else {
             activityMessage = "后续章节已经缓存完成"
             return
@@ -696,7 +716,15 @@ final class AppStore: ObservableObject {
             )
         }
         downloads.insert(contentsOf: queued, at: 0)
-        activityMessage = "已加入 \(queued.count) 个章节缓存任务"
+        let remaining = totalAvailable - selectedChapters.count
+        if remaining > 0 {
+            activityMessage = "已加入 \(queued.count) 章缓存任务（剩余 \(remaining) 章将自动继续）"
+            // Store info for auto-continue when this batch completes
+            pendingCacheContinuation = (bookID: currentBook.id, originalLimit: limit)
+        } else {
+            activityMessage = "已加入 \(queued.count) 个章节缓存任务"
+        }
+        batchCacheSaveCounter = 0
         save()
         startQueuedDownloads()
     }
@@ -933,10 +961,19 @@ final class AppStore: ObservableObject {
                 self.downloads[latestTaskIndex].progress = 1
                 self.downloads[latestTaskIndex].state = .finished
                 self.downloads[latestTaskIndex].message = content.isEmpty ? "章节为空，已记录" : "已缓存章节正文"
-                self.save()
+                // Debounced save — avoids re-encoding the entire library JSON on every chapter
+                self.batchCacheSaveCounter += 1
+                let shouldSaveNow = self.batchCacheSaveCounter % 5 == 0
+                    || self.downloads.allSatisfy({ $0.state != .queued })
+                if shouldSaveNow {
+                    self.save()
+                } else {
+                    self.scheduleSave(debounce: .seconds(3))
+                }
                 self.startQueuedDownloadsIfNeeded()
             } catch {
                 self.markDownload(task.id, state: .failed, progress: 0, message: error.localizedDescription)
+                self.save()
                 self.startQueuedDownloadsIfNeeded()
             }
         }
@@ -1021,6 +1058,17 @@ final class AppStore: ObservableObject {
         }
         if didStartTask || !staleRunningIDs.isEmpty {
             save()
+        }
+
+        // Auto-continue: if all queued/running tasks are done and there's a pending batch, queue more
+        if !didStartTask,
+           !downloads.contains(where: { $0.state == .queued || $0.state == .running }),
+           let continuation = pendingCacheContinuation,
+           let book = books.first(where: { $0.id == continuation.bookID }) {
+            pendingCacheContinuation = nil
+            // Clean up finished tasks to free memory before next batch
+            downloads.removeAll { $0.state == .finished }
+            cacheFollowingChapters(for: book, limit: continuation.originalLimit)
         }
     }
 
