@@ -94,7 +94,8 @@ struct ReaderView: View {
                     readingPercentage: readingPercentage,
                     isLoadingContent: loadingChapterIDs.contains(chapter.id),
                     contentLoadError: contentLoadError,
-                    retryAction: { Task { await loadVisibleChapterIfNeeded() } }
+                    retryAction: { Task { await loadVisibleChapterIfNeeded() } },
+                    onAdvanceToNextChapter: { moveChapter(1) }
                 )
                 .environmentObject(store)
             } else {
@@ -220,10 +221,15 @@ private struct ReaderChapterPage: View {
     var isLoadingContent: Bool
     var contentLoadError: String?
     var retryAction: () -> Void
+    var onAdvanceToNextChapter: (() -> Void)?
     private let topAnchorID = "reader-chapter-top"
 
     private var isEmpty: Bool {
         chapter.localText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var hasNextChapter: Bool {
+        chapterIndex < book.chapters.count - 1
     }
 
     var body: some View {
@@ -254,6 +260,20 @@ private struct ReaderChapterPage: View {
 
                     ReaderChapterFooter(book: book, readingPercentage: readingPercentage)
                         .environmentObject(store)
+
+                    // Next-chapter trigger zone (iOS only, when content is loaded)
+                    #if os(iOS)
+                    if hasNextChapter && !isEmpty {
+                        ReaderNextChapterTrigger(
+                            nextChapterTitle: book.chapters[chapterIndex + 1].title,
+                            onAdvance: { onAdvanceToNextChapter?() }
+                        )
+                        .foregroundStyle(Color(hex: store.readerTheme.foregroundHex))
+                    } else if !hasNextChapter && !isEmpty {
+                        ReaderEndOfBookView()
+                            .foregroundStyle(Color(hex: store.readerTheme.foregroundHex))
+                    }
+                    #endif
                 }
                 .foregroundStyle(Color(hex: store.readerTheme.foregroundHex))
                 #if os(macOS)
@@ -273,6 +293,87 @@ private struct ReaderChapterPage: View {
         }
     }
 }
+
+// MARK: - Next chapter auto-advance trigger
+
+#if os(iOS)
+private struct ReaderNextChapterTrigger: View {
+    var nextChapterTitle: String
+    var onAdvance: () -> Void
+    @State private var hasTriggered = false
+    @State private var pullProgress: CGFloat = 0
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Divider()
+                .padding(.top, 12)
+
+            VStack(spacing: 10) {
+                Image(systemName: pullProgress >= 1.0 ? "checkmark.circle.fill" : "arrow.up.circle")
+                    .font(.system(size: 28, weight: .light))
+                    .foregroundStyle(.secondary.opacity(0.7))
+                    .rotationEffect(.degrees(pullProgress >= 1.0 ? 0 : min(Double(pullProgress) * 180, 180)))
+                    .animation(.easeOut(duration: 0.2), value: pullProgress)
+
+                Text(pullProgress >= 1.0 ? "松手进入下一章" : "继续下滑 → 下一章")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+
+                Text(nextChapterTitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary.opacity(0.7))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 28)
+        }
+        .background(
+            GeometryReader { geo in
+                Color.clear
+                    .onChange(of: geo.frame(in: .global).minY) { _, minY in
+                        guard !hasTriggered else { return }
+                        let screenHeight = UIScreen.main.bounds.height
+                        // Calculate how far past the bottom the user has scrolled
+                        let overscroll = screenHeight - minY
+                        let threshold: CGFloat = 120
+                        pullProgress = min(max(overscroll / threshold, 0), 1.2)
+
+                        if pullProgress >= 1.0 {
+                            hasTriggered = true
+                            let generator = UIImpactFeedbackGenerator(style: .medium)
+                            generator.impactOccurred()
+                            // Small delay so the user sees the checkmark
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                                onAdvance()
+                            }
+                        }
+                    }
+            }
+        )
+    }
+}
+
+private struct ReaderEndOfBookView: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            Divider()
+                .padding(.top, 12)
+
+            VStack(spacing: 8) {
+                Image(systemName: "book.closed.fill")
+                    .font(.system(size: 28, weight: .light))
+                    .foregroundStyle(.secondary.opacity(0.5))
+
+                Text("已读完全部章节")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 28)
+        }
+    }
+}
+#endif
 
 private struct ReaderChapterLoadingView: View {
     var title: String
