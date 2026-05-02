@@ -65,7 +65,11 @@
 
 ## 截图
 
-> 截图待补充
+<p align="center">
+  <img src="docs/screenshots/shelf.png" width="220" />
+  <img src="docs/screenshots/service.png" width="220" />
+  <img src="docs/screenshots/font.png" width="220" />
+</p>
 
 ## 安装与运行
 
