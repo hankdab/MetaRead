@@ -233,64 +233,59 @@ private struct ReaderChapterPage: View {
     }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: store.readerTheme.paragraphSpacing) {
-                    Color.clear.frame(height: 0).id(topAnchorID)
+        ScrollView {
+            VStack(alignment: .leading, spacing: store.readerTheme.paragraphSpacing) {
+                ReaderChapterHeader(book: book, chapterIndex: chapterIndex)
 
-                    ReaderChapterHeader(book: book, chapterIndex: chapterIndex)
+                Text(chapter.title)
+                    .font(.system(size: 26, weight: .semibold, design: .serif))
+                    .padding(.bottom, 16)
 
-                    Text(chapter.title)
-                        .font(.system(size: 26, weight: .semibold, design: .serif))
-                        .padding(.bottom, 16)
-
-                    // Content states — mutually exclusive
-                    if isLoadingContent && isEmpty {
-                        ReaderChapterLoadingView(title: "正在读取正文…")
-                    } else if isEmpty {
-                        ReaderChapterEmptyState(
-                            error: contentLoadError,
-                            isReaderServerBacked: book.isReaderServerBacked == true,
-                            retryAction: retryAction
-                        )
-                    } else {
-                        ReaderBodyText(text: chapter.localText)
-                            .environmentObject(store)
-                    }
-
-                    ReaderChapterFooter(book: book, readingPercentage: readingPercentage)
+                // Content states — mutually exclusive
+                if isLoadingContent && isEmpty {
+                    ReaderChapterLoadingView(title: "正在读取正文…")
+                } else if isEmpty {
+                    ReaderChapterEmptyState(
+                        error: contentLoadError,
+                        isReaderServerBacked: book.isReaderServerBacked == true,
+                        retryAction: retryAction
+                    )
+                } else {
+                    ReaderBodyText(text: chapter.localText)
                         .environmentObject(store)
-
-                    // Next-chapter trigger zone (iOS only, when content is loaded)
-                    #if os(iOS)
-                    if hasNextChapter && !isEmpty {
-                        ReaderNextChapterTrigger(
-                            nextChapterTitle: book.chapters[chapterIndex + 1].title,
-                            onAdvance: { onAdvanceToNextChapter?() }
-                        )
-                        .foregroundStyle(Color(hex: store.readerTheme.foregroundHex))
-                    } else if !hasNextChapter && !isEmpty {
-                        ReaderEndOfBookView()
-                            .foregroundStyle(Color(hex: store.readerTheme.foregroundHex))
-                    }
-                    #endif
                 }
-                .foregroundStyle(Color(hex: store.readerTheme.foregroundHex))
-                #if os(macOS)
-                .frame(maxWidth: 820, alignment: .leading)
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 56)
-                #else
-                .frame(maxWidth: 760, alignment: .leading)
-                .padding(.horizontal, 28)
+
+                ReaderChapterFooter(book: book, readingPercentage: readingPercentage)
+                    .environmentObject(store)
+
+                // Next-chapter trigger zone (iOS only, when content is loaded)
+                #if os(iOS)
+                if hasNextChapter && !isEmpty {
+                    ReaderNextChapterTrigger(
+                        nextChapterTitle: book.chapters[chapterIndex + 1].title,
+                        onAdvance: { onAdvanceToNextChapter?() }
+                    )
+                    .foregroundStyle(Color(hex: store.readerTheme.foregroundHex))
+                } else if !hasNextChapter && !isEmpty {
+                    ReaderEndOfBookView()
+                        .foregroundStyle(Color(hex: store.readerTheme.foregroundHex))
+                }
                 #endif
-                .padding(.top, 34)
-                .padding(.bottom, 132)
             }
-            .onChange(of: chapterIndex) { _, _ in
-                DispatchQueue.main.async { proxy.scrollTo(topAnchorID, anchor: .top) }
-            }
+            .foregroundStyle(Color(hex: store.readerTheme.foregroundHex))
+            #if os(macOS)
+            .frame(maxWidth: 820, alignment: .leading)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 56)
+            #else
+            .frame(maxWidth: 760, alignment: .leading)
+            .padding(.horizontal, 28)
+            #endif
+            .padding(.top, 34)
+            .padding(.bottom, 132)
         }
+        // Force ScrollView recreation on chapter change → always starts at top
+        .id(chapterIndex)
     }
 }
 
