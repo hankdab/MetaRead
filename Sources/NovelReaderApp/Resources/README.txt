@@ -1,0 +1,1 @@
+Runtime resources for NovelReaderApp.
