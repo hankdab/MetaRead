@@ -176,21 +176,13 @@ struct ServerSetupGuideView: View {
                 VStack(spacing: 0) {
                     // Header
                     VStack(spacing: 6) {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .fill(
-                                    LinearGradient(
-                                        colors: [Color(hex: "#2C3A4A"), Color(hex: "#1A2430")],
-                                        startPoint: .topLeading, endPoint: .bottomTrailing
-                                    )
-                                )
-                                .frame(width: 56, height: 56)
-
-                            Text("元")
-                                .font(.system(size: 26, weight: .light, design: .serif))
-                                .foregroundStyle(Color(hex: "#E8DCC8"))
-                        }
-                        .padding(.bottom, 8)
+                        Image("LaunchIcon")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 64, height: 64)
+                            .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+                            .shadow(color: .black.opacity(0.12), radius: 12, y: 6)
+                            .padding(.bottom, 8)
 
                         Text("欢迎使用元阅")
                             .font(.system(size: 22, weight: .medium))
@@ -371,27 +363,13 @@ private struct StartupLoadingView: View {
             VStack(spacing: 0) {
                 Spacer()
 
-                // Icon mark
-                ZStack {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color(hex: "#2C3A4A"),
-                                    Color(hex: "#1A2430")
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 80, height: 80)
-                        .shadow(color: .black.opacity(0.18), radius: 24, y: 10)
-
-                    Text("元")
-                        .font(.system(size: 38, weight: .light, design: .serif))
-                        .foregroundStyle(Color(hex: "#E8DCC8"))
-                        .kerning(-1)
-                }
+                // App icon
+                Image("LaunchIcon")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 88, height: 88)
+                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .shadow(color: .black.opacity(0.18), radius: 24, y: 10)
 
                 // App name
                 VStack(spacing: 4) {
